@@ -27,8 +27,12 @@ describe("Devin provider", () => {
           acpDialect: "generic",
           acpLaunchSpec: {
             displayName: "Devin",
-            command: "devin",
-            args: ["acp"],
+            command: process.execPath,
+            args: [
+              expect.stringMatching(/acp-stdio-shim\.mjs$/),
+              "devin",
+              "acp",
+            ],
             env: {},
           },
         },

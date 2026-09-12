@@ -1,13 +1,22 @@
+import { fileURLToPath } from "node:url";
 import type {
   BbPluginApi,
   PluginProviderDeclaration,
 } from "@get-bb/plugin-sdk";
 
+// BB's ACP bridge answers fs/write_text_file with `result: null`, which
+// Devin's ACP client rejects with a -32700 parse error (the write still
+// lands, but the tool call renders as failed). Route launches through the
+// stdio shim, which rewrites those responses to `result: {}`.
+const acpShimPath = fileURLToPath(
+  new URL("../lib/acp-stdio-shim.mjs", import.meta.url),
+);
+
 const acpBridgeOptions = {
   acpLaunchSpec: {
     displayName: "Devin",
-    command: "devin",
-    args: ["acp"],
+    command: process.execPath,
+    args: [acpShimPath, "devin", "acp"],
     env: {},
   },
   acpDialect: "generic",
