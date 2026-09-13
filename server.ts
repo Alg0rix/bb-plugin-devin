@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type {
   BbPluginApi,
@@ -9,7 +10,9 @@ import type {
 // lands, but the tool call renders as failed). Route launches through the
 // stdio shim, which rewrites those responses to `result: {}`.
 const acpShimPath = fileURLToPath(
-  new URL("../lib/acp-stdio-shim.mjs", import.meta.url),
+  existsSync(new URL("./lib/acp-stdio-shim.mjs", import.meta.url))
+    ? new URL("./lib/acp-stdio-shim.mjs", import.meta.url)
+    : new URL("../lib/acp-stdio-shim.mjs", import.meta.url),
 );
 
 const acpBridgeOptions = {

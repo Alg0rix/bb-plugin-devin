@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import plugin, { devinProvider } from "../server";
@@ -14,7 +15,8 @@ describe("Devin provider", () => {
       await plugin(bb);
 
       expect(harness.registrations.providerRegistrations).toHaveLength(1);
-      expect(harness.registrations.providerRegistrations[0]).toMatchObject({
+      const registration = harness.registrations.providerRegistrations[0];
+      expect(registration).toMatchObject({
         id: "devin",
         displayName: "Devin",
         experimental_visibility: "installed",
@@ -37,6 +39,9 @@ describe("Devin provider", () => {
           },
         },
       });
+      expect(
+        existsSync(devinProvider.experimental_bridgeOptions.acpLaunchSpec.args[0]),
+      ).toBe(true);
     } finally {
       await harness.dispose();
     }
