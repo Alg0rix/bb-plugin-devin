@@ -25,7 +25,7 @@ const acpBridgeOptions = {
 export const devinProvider = {
   id: "devin",
   displayName: "Devin",
-  icon: "Bot",
+  icon: "./icons/devin.svg",
   experimental_visibility: "installed",
   maintenance: {
     health: true,
