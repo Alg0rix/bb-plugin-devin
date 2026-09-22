@@ -96,6 +96,61 @@ describe("devin provider bridge", () => {
     expect(swe?.isDefault).toBe(true);
   });
 
+  it("reports probed thought levels and resolves them to the rep uid", async () => {
+    const { bridge, forwarded, sentMessages } = makeHarness({
+      options: [{ value: "swe-2-high", name: "SWE-2" }],
+      currentValue: "swe-2-high",
+      thoughtLevelsByModel: new Map([
+        [
+          "swe-2-high",
+          {
+            options: [
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+              { value: "max", name: "Max" },
+            ],
+            currentValue: "max",
+          },
+        ],
+      ]),
+    });
+    bridge.handleLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "model/list",
+        params: {
+          cwd: "/repo",
+          providerOptions: { acpLaunchSpec: LAUNCH_SPEC },
+        },
+      }),
+    );
+    await flush();
+
+    const response = sentMessages()[0] as {
+      result: {
+        models: {
+          id: string;
+          supportedReasoningEfforts: { reasoningEffort: string }[];
+          defaultReasoningEffort?: string;
+        }[];
+      };
+    };
+    const swe = response.result.models.find((m) => m.id === "swe-2-high");
+    expect(
+      swe?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
+    ).toEqual(["medium", "high", "max"]);
+    expect(swe?.defaultReasoningEffort).toBe("max");
+
+    bridge.handleLine(threadStart("swe-2-high", { reasoningLevel: "max" }));
+    await flush();
+    const forwardedRequest = JSON.parse(forwarded[0]) as {
+      params: { options: { model: string; reasoningLevel: string } };
+    };
+    expect(forwardedRequest.params.options.model).toBe("swe-2-high");
+    expect(forwardedRequest.params.options.reasoningLevel).toBe("max");
+  });
+
   it("forwards model/list to the inner bridge when discovery fails", async () => {
     const { bridge, forwarded, sentMessages } = makeHarness(null);
     const line = JSON.stringify({

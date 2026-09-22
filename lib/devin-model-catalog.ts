@@ -10,6 +10,11 @@ export interface DevinModelOptionEntry {
   name?: string;
 }
 
+export interface DevinThoughtLevelLadder {
+  options: DevinModelOptionEntry[];
+  currentValue?: string;
+}
+
 export interface DevinModelVariant {
   uid: string;
   displayName: string;
@@ -49,6 +54,19 @@ const EFFORT_TOKENS: [string, ReasoningLevel][] = [
   ["max", "max"],
   ["low", "low"],
 ];
+
+const THOUGHT_LEVEL_VALUE_TO_LEVEL = new Map<string, ReasoningLevel>([
+  ["none", "none"],
+  ["minimal", "low"],
+  ["low", "low"],
+  ["medium", "medium"],
+  ["high", "high"],
+  ["extra-high", "xhigh"],
+  ["xhigh", "xhigh"],
+  ["ultracode", "ultracode"],
+  ["max", "max"],
+  ["ultra", "ultra"],
+]);
 
 const AGENT_MANAGED_EFFORTS = [
   {
@@ -128,6 +146,7 @@ function familyDisplayName(displayName: string, effortToken?: string): string {
 export function buildDevinModelCatalog(
   modelOptions: readonly DevinModelOptionEntry[],
   currentValue?: string,
+  thoughtLevels?: ReadonlyMap<string, DevinThoughtLevelLadder>,
 ): DevinModelCatalog {
   const families = new Map<string, DevinModelVariant[]>();
   for (const option of modelOptions) {
@@ -161,9 +180,40 @@ export function buildDevinModelCatalog(
       return { variant, level };
     });
 
+    const nonFast = leveled.filter((entry) => !entry.variant.fast);
+    const pool = nonFast.length > 0 ? nonFast : leveled;
+    const currentEntry = currentValue
+      ? leveled.find((entry) => entry.variant.uid === currentValue)
+      : undefined;
+    const repEntry =
+      currentEntry ??
+      pool.find((entry) => entry.level === "medium") ??
+      pool.find((entry) => entry.level !== "none") ??
+      pool[0];
+
+    const probed =
+      (currentEntry
+        ? thoughtLevels?.get(currentEntry.variant.uid)
+        : undefined) ??
+      thoughtLevels?.get(repEntry.variant.uid) ??
+      variants
+        .map((variant) => thoughtLevels?.get(variant.uid))
+        .find((ladder) => ladder !== undefined);
+
     const byLevel = new Map<ReasoningLevel, { normal?: string; fast?: string }>();
     const repEffortByCell = new Map<string, ReasoningLevel>();
     for (const { variant, level } of leveled) {
+      // When the agent reports a real thought_level ladder, variants whose
+      // level was only inferred (no effort token, not a thinking marker)
+      // would advertise levels the model does not actually offer.
+      if (
+        probed !== undefined &&
+        variant.effortToken === undefined &&
+        !variant.thinking &&
+        level !== "none"
+      ) {
+        continue;
+      }
       const slot = variant.fast ? "fast" : "normal";
       const tier = byLevel.get(level) ?? {};
       const cellKey = `${level}:${slot}`;
@@ -177,17 +227,15 @@ export function buildDevinModelCatalog(
         byLevel.set(level, tier);
       }
     }
-
-    const nonFast = leveled.filter((entry) => !entry.variant.fast);
-    const pool = nonFast.length > 0 ? nonFast : leveled;
-    const currentEntry = currentValue
-      ? leveled.find((entry) => entry.variant.uid === currentValue)
-      : undefined;
-    const repEntry =
-      currentEntry ??
-      pool.find((entry) => entry.level === "medium") ??
-      pool.find((entry) => entry.level !== "none") ??
-      pool[0];
+    if (probed !== undefined) {
+      for (const option of probed.options) {
+        const level = THOUGHT_LEVEL_VALUE_TO_LEVEL.get(option.value);
+        if (level === undefined || byLevel.has(level)) {
+          continue;
+        }
+        byLevel.set(level, { normal: repEntry.variant.uid });
+      }
+    }
 
     const nameByLevel = new Map<ReasoningLevel, string>();
     for (const { variant, level } of leveled) {
@@ -195,13 +243,32 @@ export function buildDevinModelCatalog(
         nameByLevel.set(level, variant.displayName);
       }
     }
+    if (probed !== undefined) {
+      for (const option of probed.options) {
+        const level = THOUGHT_LEVEL_VALUE_TO_LEVEL.get(option.value);
+        if (level !== undefined && !nameByLevel.has(level)) {
+          nameByLevel.set(level, option.name ?? option.value);
+        }
+      }
+    }
+
+    const probedCurrentLevel =
+      probed?.currentValue === undefined
+        ? undefined
+        : THOUGHT_LEVEL_VALUE_TO_LEVEL.get(probed.currentValue);
+    const defaultLevel =
+      probedCurrentLevel !== undefined && byLevel.has(probedCurrentLevel)
+        ? probedCurrentLevel
+        : repEntry.level;
 
     const levels = [...byLevel.keys()].sort(
       (a, b) => reasoningLevelValues.indexOf(a) - reasoningLevelValues.indexOf(b),
     );
     const agentManaged =
-      levels.length === 1 &&
-      variants.every((v) => v.effortToken === undefined && !v.thinking);
+      levels.length === 0 ||
+      (levels.length === 1 &&
+        variants.every((v) => v.effortToken === undefined && !v.thinking) &&
+        (probed === undefined || probed.options.length === 0));
 
     const family: DevinModelFamily = {
       key,
@@ -209,7 +276,7 @@ export function buildDevinModelCatalog(
       byLevel,
       nameByLevel,
       repUid: repEntry.variant.uid,
-      repLevel: repEntry.level,
+      repLevel: defaultLevel,
     };
     familyByKey.set(key, family);
     for (const variant of variants) {
@@ -230,7 +297,7 @@ export function buildDevinModelCatalog(
             reasoningEffort: level,
             description: nameByLevel.get(level) ?? "",
           })),
-      defaultReasoningEffort: repEntry.level,
+      defaultReasoningEffort: defaultLevel,
       isDefault:
         currentValue !== undefined && repEntry.variant.uid === currentValue,
     });

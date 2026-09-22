@@ -143,6 +143,122 @@ describe("buildDevinModelCatalog", () => {
   });
 });
 
+describe("probed thought levels", () => {
+  it("merges the probed ladder onto the representative uid", () => {
+    const catalog = buildDevinModelCatalog(
+      [{ value: "swe-2-high", name: "SWE-2" }],
+      "swe-2-high",
+      new Map([
+        [
+          "swe-2-high",
+          {
+            options: [
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+              { value: "max", name: "Max" },
+            ],
+            currentValue: "max",
+          },
+        ],
+      ]),
+    );
+    const swe = catalog.models.find((m) => m.id === "swe-2-high");
+    expect(
+      swe?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
+    ).toEqual(["medium", "high", "max"]);
+    expect(swe?.defaultReasoningEffort).toBe("max");
+    expect(
+      resolveDevinVariantUid(catalog, {
+        model: "swe-2-high",
+        reasoningLevel: "max",
+      }),
+    ).toBe("swe-2-high");
+    expect(
+      resolveDevinVariantUid(catalog, {
+        model: "swe-2-high",
+        reasoningLevel: "medium",
+      }),
+    ).toBe("swe-2-high");
+  });
+
+  it("drops the synthetic medium level when a probed ladder exists", () => {
+    const catalog = buildDevinModelCatalog(
+      [{ value: "glm-5-2", name: "GLM-5.2 High" }],
+      undefined,
+      new Map([
+        [
+          "glm-5-2",
+          {
+            options: [
+              { value: "none", name: "None" },
+              { value: "high", name: "High" },
+              { value: "max", name: "Max" },
+            ],
+            currentValue: "high",
+          },
+        ],
+      ]),
+    );
+    const glm = catalog.models.find((m) => m.id === "glm-5-2");
+    expect(
+      glm?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
+    ).toEqual(["none", "high", "max"]);
+    expect(glm?.defaultReasoningEffort).toBe("high");
+  });
+
+  it("treats a model probed without a thought level as agent-managed", () => {
+    const catalog = buildDevinModelCatalog(
+      [{ value: "kimi-k2-6", name: "Kimi K2.6" }],
+      undefined,
+      new Map([["kimi-k2-6", { options: [] }]]),
+    );
+    expect(catalog.models[0]?.supportedReasoningEfforts).toEqual([
+      {
+        reasoningEffort: "medium",
+        description: "Reasoning effort is managed by the connected ACP agent.",
+      },
+    ]);
+  });
+
+  it("keeps real uid variants authoritative over probed levels", () => {
+    const catalog = buildDevinModelCatalog(
+      [
+        { value: "swe-2-medium", name: "SWE-2 Medium" },
+        { value: "swe-2-high", name: "SWE-2 High" },
+      ],
+      "swe-2-high",
+      new Map([
+        [
+          "swe-2-high",
+          {
+            options: [
+              { value: "medium" },
+              { value: "high" },
+              { value: "max" },
+            ],
+          },
+        ],
+      ]),
+    );
+    const swe = catalog.models.find((m) => m.id === "swe-2-high");
+    expect(
+      swe?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
+    ).toEqual(["medium", "high", "max"]);
+    expect(
+      resolveDevinVariantUid(catalog, {
+        model: "swe-2-high",
+        reasoningLevel: "medium",
+      }),
+    ).toBe("swe-2-medium");
+    expect(
+      resolveDevinVariantUid(catalog, {
+        model: "swe-2-high",
+        reasoningLevel: "max",
+      }),
+    ).toBe("swe-2-high");
+  });
+});
+
 describe("resolveDevinVariantUid", () => {
   const catalog = buildDevinModelCatalog(OPTIONS);
 

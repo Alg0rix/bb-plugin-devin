@@ -82,7 +82,11 @@ export function createDevinProviderBridge(deps: DevinBridgeDeps) {
     if (!discovery) {
       return null;
     }
-    catalog = buildDevinModelCatalog(discovery.options, discovery.currentValue);
+    catalog = buildDevinModelCatalog(
+      discovery.options,
+      discovery.currentValue,
+      discovery.thoughtLevelsByModel,
+    );
     catalogKey = key;
     return catalog;
   }
@@ -104,6 +108,7 @@ export function createDevinProviderBridge(deps: DevinBridgeDeps) {
       resolvedCatalog = buildDevinModelCatalog(
         discovery.options,
         discovery.currentValue,
+        discovery.thoughtLevelsByModel,
       );
       catalog = resolvedCatalog;
       catalogKey = key;

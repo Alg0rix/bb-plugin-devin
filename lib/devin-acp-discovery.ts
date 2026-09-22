@@ -5,6 +5,7 @@ import {
   experimental_recordProviderChildIo,
   withoutBridgeRuntimeEnv,
 } from "@get-bb/plugin-sdk/provider-bridge";
+import type { DevinThoughtLevelLadder } from "./devin-model-catalog";
 
 export interface DevinAcpLaunchSpec {
   command: string;
@@ -16,6 +17,7 @@ export interface DevinAcpLaunchSpec {
 export interface DevinModelDiscovery {
   options: { value: string; name?: string }[];
   currentValue?: string;
+  thoughtLevelsByModel?: Map<string, DevinThoughtLevelLadder>;
 }
 
 const acpConfigOptionValueSchema = z
@@ -41,8 +43,87 @@ const acpSessionNewResultSchema = z
   })
   .passthrough();
 
+const acpConfigStateResultSchema = z
+  .object({
+    configOptions: z.array(acpConfigOptionSchema).nullable().optional(),
+  })
+  .passthrough();
+
 const DISCOVERY_TIMEOUT_MS = 30_000;
 const DISCOVERY_TTL_MS = 60_000;
+const THOUGHT_LEVEL_PROBE_BUDGET_MS = 20_000;
+
+type AcpConfigOption = z.infer<typeof acpConfigOptionSchema>;
+
+function findThoughtLevelOption(
+  options: readonly AcpConfigOption[] | undefined,
+): AcpConfigOption | undefined {
+  return (
+    (options ?? []).find((option) => option.category === "thought_level") ??
+    (options ?? []).find((option) => option.id === "thought_level")
+  );
+}
+
+function toThoughtLevelLadder(
+  option: AcpConfigOption | undefined,
+): DevinThoughtLevelLadder {
+  return {
+    options: (option?.options ?? []).map((entry) => ({
+      value: entry.value,
+      ...(entry.name !== undefined ? { name: entry.name } : {}),
+    })),
+    ...(option?.currentValue !== undefined
+      ? { currentValue: option.currentValue }
+      : {}),
+  };
+}
+
+async function probeThoughtLevels(args: {
+  request: (method: string, params: unknown) => Promise<unknown>;
+  sessionId: string;
+  modelOption: AcpConfigOption;
+  initialConfigOptions: readonly AcpConfigOption[];
+}): Promise<Map<string, DevinThoughtLevelLadder>> {
+  const { request, sessionId, modelOption } = args;
+  const ladders = new Map<string, DevinThoughtLevelLadder>();
+  if (modelOption.currentValue !== undefined) {
+    ladders.set(
+      modelOption.currentValue,
+      toThoughtLevelLadder(
+        findThoughtLevelOption(args.initialConfigOptions),
+      ),
+    );
+  }
+  const startedAt = Date.now();
+  for (const option of modelOption.options ?? []) {
+    if (option.value === modelOption.currentValue) {
+      continue;
+    }
+    if (Date.now() - startedAt > THOUGHT_LEVEL_PROBE_BUDGET_MS) {
+      break;
+    }
+    let result: unknown;
+    try {
+      result = await request("session/set_config_option", {
+        sessionId,
+        configId: modelOption.id,
+        value: option.value,
+      });
+    } catch {
+      break;
+    }
+    const parsed = acpConfigStateResultSchema.safeParse(result);
+    const configOptions = parsed.success ? parsed.data.configOptions : undefined;
+    if (configOptions === undefined || configOptions === null) {
+      continue;
+    }
+    ladders.set(
+      option.value,
+      toThoughtLevelLadder(findThoughtLevelOption(configOptions)),
+    );
+  }
+  return ladders;
+}
 
 interface CacheEntry {
   key: string;
@@ -146,9 +227,16 @@ function runDiscovery(
         finish(null);
         return;
       }
+      const thoughtLevelsByModel = await probeThoughtLevels({
+        request,
+        sessionId: parsed.data.sessionId,
+        modelOption,
+        initialConfigOptions: options,
+      }).catch(() => new Map<string, DevinThoughtLevelLadder>());
       finish({
         options: modelOption.options ?? [],
         currentValue: modelOption.currentValue,
+        thoughtLevelsByModel,
       });
     })().catch(() => finish(null));
   });
