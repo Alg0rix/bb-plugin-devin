@@ -36,6 +36,45 @@ function runShim(
 }
 
 describe("acp-stdio-shim", () => {
+  it("identifies initialize as bb-plugin-devin while preserving other fields", async () => {
+    const request = {
+      jsonrpc: "2.0",
+      id: 7,
+      method: "initialize",
+      params: {
+        protocolVersion: 1,
+        clientInfo: { name: "bb", version: "1.0.0", title: "BB" },
+        clientCapabilities: { fs: { writeTextFile: true } },
+      },
+    };
+    const lines = await runShim((stdin) => {
+      stdin.write(`${JSON.stringify(request)}\n`);
+    });
+    const echo = lines.find((line) => line.startsWith("GOT:"));
+    expect(echo).toBeDefined();
+    expect(JSON.parse(echo!.slice(4))).toEqual({
+      ...request,
+      params: {
+        ...request.params,
+        clientInfo: { ...request.params.clientInfo, name: "bb-plugin-devin" },
+      },
+    });
+  });
+
+  it("passes other requests, notifications and non-JSON input through verbatim", async () => {
+    const inputs = [
+      '{ "jsonrpc": "2.0", "id": 8, "method": "session/new", "params": { "cwd": "/tmp", "mcpServers": [] } }',
+      '{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"s"}}',
+      'non-JSON input',
+    ];
+    const lines = await runShim((stdin) => {
+      for (const input of inputs) stdin.write(`${input}\n`);
+    });
+    expect(lines.filter((line) => line.startsWith("GOT:"))).toEqual(
+      inputs.map((input) => `GOT:${input}`),
+    );
+  });
+
   it("forwards the agent's fs/write_text_file request upstream", async () => {
     const lines = await runShim(() => {});
     expect(

@@ -8,7 +8,8 @@ import type {
 // BB's ACP bridge answers fs/write_text_file with `result: null`, which
 // Devin's ACP client rejects with a -32700 parse error (the write still
 // lands, but the tool call renders as failed). Route launches through the
-// stdio shim, which rewrites those responses to `result: {}`.
+// stdio shim, which rewrites those responses to `result: {}` and identifies
+// the client as bb-plugin-devin so Devin exposes the full model catalog.
 const acpShimPath = fileURLToPath(
   existsSync(new URL("./lib/acp-stdio-shim.mjs", import.meta.url))
     ? new URL("./lib/acp-stdio-shim.mjs", import.meta.url)

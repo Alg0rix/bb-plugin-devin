@@ -207,7 +207,7 @@ function runDiscovery(
     void (async () => {
       await request("initialize", {
         protocolVersion: 1,
-        clientInfo: { name: "bb", version: "1.0.0" },
+        clientInfo: { name: "bb-plugin-devin", version: "1.0.0" },
         clientCapabilities: {
           fs: { readTextFile: true, writeTextFile: true },
           terminal: false,
