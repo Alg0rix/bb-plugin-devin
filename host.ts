@@ -18,6 +18,10 @@ import {
   splitDevinPrimaryModels,
   type DevinModelCatalog,
 } from "./lib/devin-model-catalog";
+import {
+  hostLaunchSpecDeps,
+  localizeDevinLaunchSpec,
+} from "./lib/host-launch-spec";
 
 type BridgeIo = ReturnType<typeof createBridgeIo>;
 
@@ -28,6 +32,7 @@ interface DevinBridgeDeps {
     spec: DevinAcpLaunchSpec,
     cwd: string,
   ) => Promise<DevinModelDiscovery | null>;
+  localizeLaunchSpec?: <T extends DevinAcpLaunchSpec>(spec: T) => T;
 }
 
 const SESSION_OPTIONS_METHODS = new Set([
@@ -67,6 +72,57 @@ function decodeLaunchSpec(
 
 export function createDevinProviderBridge(deps: DevinBridgeDeps) {
   const { inner, io, discover } = deps;
+  const localize = deps.localizeLaunchSpec;
+
+  // Rewrite server-built launch specs to this host's paths before anything
+  // (discovery, the inner ACP bridge, health checks) spawns them.
+  function localizeRequest(
+    request: JsonRpcRequestMessage,
+    line: string,
+  ): { request: JsonRpcRequestMessage; line: string } {
+    if (!localize || !request.params) {
+      return { request, line };
+    }
+    const params = request.params;
+    let changed = false;
+    const rewrite = (
+      providerOptions: Record<string, unknown> | undefined,
+    ): Record<string, unknown> | undefined => {
+      const spec = decodeLaunchSpec(providerOptions);
+      if (!providerOptions || !spec) {
+        return providerOptions;
+      }
+      const localized = localize(spec);
+      if (localized === spec) {
+        return providerOptions;
+      }
+      changed = true;
+      return { ...providerOptions, acpLaunchSpec: localized };
+    };
+    const providerOptions = rewrite(params.providerOptions);
+    const optionsProviderOptions = rewrite(params.options?.providerOptions);
+    if (!changed) {
+      return { request, line };
+    }
+    const next: JsonRpcRequestMessage = {
+      ...request,
+      params: {
+        ...params,
+        ...(params.providerOptions ? { providerOptions } : {}),
+        ...(params.options
+          ? {
+              options: {
+                ...params.options,
+                ...(params.options.providerOptions
+                  ? { providerOptions: optionsProviderOptions }
+                  : {}),
+              },
+            }
+          : {}),
+      },
+    };
+    return { request: next, line: JSON.stringify(next) };
+  }
   let catalog: DevinModelCatalog | null = null;
   let catalogKey: string | undefined;
 
@@ -179,15 +235,16 @@ export function createDevinProviderBridge(deps: DevinBridgeDeps) {
       if (!trimmed) {
         return;
       }
-      let request: JsonRpcRequestMessage;
+      let parsed: JsonRpcRequestMessage;
       try {
-        request = JSON.parse(trimmed) as JsonRpcRequestMessage;
+        parsed = JSON.parse(trimmed) as JsonRpcRequestMessage;
       } catch {
         inner.handleLine(line);
         return;
       }
+      const { request, line: localLine } = localizeRequest(parsed, trimmed);
       if (request.method === "model/list" && request.id !== undefined) {
-        void handleModelList(request, trimmed);
+        void handleModelList(request, localLine);
         return;
       }
       if (
@@ -195,10 +252,10 @@ export function createDevinProviderBridge(deps: DevinBridgeDeps) {
         SESSION_OPTIONS_METHODS.has(request.method) &&
         request.id !== undefined
       ) {
-        void rewriteAndForward(request, trimmed);
+        void rewriteAndForward(request, localLine);
         return;
       }
-      inner.handleLine(line);
+      inner.handleLine(localLine === trimmed ? line : localLine);
     },
     ...(inner.start ? { start: (ctx) => inner.start?.(ctx) } : {}),
     ...(inner.onClose ? { onClose: () => inner.onClose?.() } : {}),
@@ -211,4 +268,5 @@ export const experimental_providerBridge = createDevinProviderBridge({
   inner: experimental_acpProviderBridge,
   io: createBridgeIo(),
   discover: discoverDevinModelOption,
+  localizeLaunchSpec: (spec) => localizeDevinLaunchSpec(spec, hostLaunchSpecDeps),
 });

@@ -16,6 +16,16 @@ devin auth login
 The plugin does not store or forward Devin credentials; the CLI owns local
 authentication.
 
+## Remote hosts
+
+When the BB server and a host daemon run on different machines, the server's
+launch spec points at the server's Node binary and plugin checkout, which do
+not exist on the host. The host bridge rewrites such specs to the host's own
+Node binary and a copy of `lib/acp-stdio-shim.mjs` that it writes to
+`$TMPDIR/bb-plugin-devin/`. After editing the shim, run
+`npm run generate:shim` so the embedded copy in
+`lib/acp-stdio-shim-source.ts` stays in sync (a test enforces this).
+
 ## Install locally
 
 From this directory:

@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-devin",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "type": "module",
   "engines": {
     "bb": ">=0.42",
@@ -17,7 +17,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "generate:shim": "node scripts/generate-shim-source.mjs"
   },
   "dependencies": {
     "@get-bb/plugin-sdk": "0.4.84",
